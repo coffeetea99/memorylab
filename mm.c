@@ -40,24 +40,106 @@ static range_t **gl_ranges;
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
 /* user-defined functions */
-/* get start pointer of the block and return pointer of its header */
-static int header_pointer(void* start) {
-    return (int*)start - 1;
+
+/* get start pointer of the block
+ * return pointer of its header
+ */
+static void* header_pointer(void* start) {
+    return (char*)start - 4;
 }
 
-/* get start pointer of the block and return its header entry */
+/* get start pointer of the block
+ * return its header entry(4 byte)
+ */
 static int header(void* start) {
-    return header_pointer(start);
+    return *((int*)header_pointer(start));
 }
 
-/* get start pointer of the block and return if the block is allocated */
-static int is_allocated(void* start) {
-    return header(start) & 0x1;
+/* get start pointer of the block
+ * return pointer of its footer
+ */
+static void* footer_pointer(void* start) {
+    return (char*)start + block_size(start);
 }
 
-/* get start pointer of the block and return the block's size */
+/* get start pointer of the block
+ * return its footer entry(4 byte) 
+ */
+static int footer(void* start) {
+    return *((int*)footer_pointer(start));
+}
+
+/* get start pointer of the block
+ * return if the block is allocated(1 byte)
+ */
+static char is_allocated(void* start) {
+    return (char)header(start) & 0x1;
+}
+
+/* get start pointer of the block
+ * return the block's size(4 byte)
+ */
 static int block_size(void* start) {
     return header(start) & ~0x7;
+}
+
+/* get start pointer of the block and block size that will change into
+ * rewrite size of the block on header and footer
+ */
+static void rewrite_block_size(void* start, int size){
+    int* header_pointer_4bit = header_pointer(start);
+    int* footer_pointer_4bit = footer_pointer(start);
+    *header_pointer_4bit = *footer_pointer_4bit = size | (*footer_pointer_4bit & 0x1);
+}
+
+/* get start pointer of the block and block status that will change into
+ * rewrite status of the block on header and footer
+ */
+static void rewrite_block_status(void* start, char status) {
+    char* header_pointer_1bit = header_pointer(start);
+    char* footer_pointer_1bit = footer_pointer(start);
+    *header_pointer_1bit = *footer_pointer_1bit = status | (*footer_pointer_1bit & ~0x7);
+}
+
+/* get start pointer of the block
+ * if can coalesce with front block, coalesce and return new pointer
+ * if not, just return original pointer
+ */
+static void* coalesce_front(void* start) {
+    int* front_footer_pointer = (char*)start - 8;
+    int front_footer = *front_footer_pointer;
+    char front_allocated = (char)front_footer & 0x1;
+    if ( front_allocated != is_allocated(start) ) {
+        return start;
+    } else {
+        int front_size = front_footer & ~0x7;
+        int total_size = front_size + block_size(start);
+
+        void* front_pointer = (char*)start - front_size - 8;
+        int* front_header_pointer_4bit = (char*)front_pointer - 4;
+        int* footer_pointer_4bit = footer_pointer(start);
+        *front_header_pointer_4bit = *footer_pointer_4bit = total_size | front_allocated;
+
+        return front_pointer;
+    }
+}
+
+/* get start pointer of the block
+ * if can coalesce with back block, coalesce
+ * return nothing
+ */
+static void coalesce_back(void* start) {
+    int* back_header_pointer = (char*)start + block_size(start) + 4;
+    int back_header = *back_header_pointer;
+    char back_allocated = (char)back_header & 0x1;
+    if ( back_allocated == is_allocated(0x1)) {
+        int back_size = back_header & ~0x7;
+        int total_size = back_size + block_size(start);
+
+        int* back_footer_pointer_4bit = (char*)start + total_size + 8;
+        int* header_pointer_4bit = header_pointer(start);
+        *header_pointer_4bit = *back_footer_pointer_4bit = total_size | back_allocated;
+    }
 }
 
 /*
