@@ -39,6 +39,27 @@ static range_t **gl_ranges;
 
 #define SIZE_T_SIZE (ALIGN(sizeof(size_t)))
 
+/* user-defined functions */
+/* get start pointer of the block and return pointer of its header */
+static int header_pointer(void* start) {
+    return (int*)start - 1;
+}
+
+/* get start pointer of the block and return its header entry */
+static int header(void* start) {
+    return header_pointer(start);
+}
+
+/* get start pointer of the block and return if the block is allocated */
+static int is_allocated(void* start) {
+    return header(start) & 0x1;
+}
+
+/* get start pointer of the block and return the block's size */
+static int block_size(void* start) {
+    return header(start) & ~0x7;
+}
+
 /*
  * remove_range - manipulate range lists
  * DON'T MODIFY THIS FUNCTION AND LEAVE IT AS IT WAS
