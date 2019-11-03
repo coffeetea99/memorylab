@@ -56,6 +56,13 @@ static int header(void* start) {
 }
 
 /* get start pointer of the block
+ * return the block's size(4 byte)
+ */
+static int block_size(void* start) {
+    return header(start) & ~0x7;
+}
+
+/* get start pointer of the block
  * return pointer of its footer
  */
 static void* footer_pointer(void* start) {
@@ -74,13 +81,6 @@ static int footer(void* start) {
  */
 static char is_allocated(void* start) {
     return (char)header(start) & 0x1;
-}
-
-/* get start pointer of the block
- * return the block's size(4 byte)
- */
-static int block_size(void* start) {
-    return header(start) & ~0x7;
 }
 
 /* get start pointer of the block and block size that will change into
