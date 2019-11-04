@@ -86,10 +86,11 @@ static char is_allocated(void* start) {
 /* get start pointer of the block and block size that will change into
  * rewrite size of the block on header and footer
  */
-static void rewrite_block_size(void* start, int size){
+static void reset_block_size(void* start, int size){
     int* header_pointer_4bit = header_pointer(start);
+    *header_pointer_4bit = size | (*header_pointer_4bit & 0x1);
     int* footer_pointer_4bit = footer_pointer(start);
-    *header_pointer_4bit = *footer_pointer_4bit = size | (*footer_pointer_4bit & 0x1);
+    *footer_pointer_4bit = *header_pointer_4bit;
 }
 
 /* get start pointer of the block and block status that will change into
@@ -113,13 +114,12 @@ static void* coalesce_front(void* start) {
         return start;
     } else {
         int front_size = front_footer & ~0x7;
-        int total_size = front_size + block_size(start);
+        int total_size = front_size + block_size(start) + 8;
 
         void* front_pointer = (char*)start - front_size - 8;
         int* front_header_pointer_4bit = (char*)front_pointer - 4;
         int* footer_pointer_4bit = footer_pointer(start);
         *front_header_pointer_4bit = *footer_pointer_4bit = total_size | front_allocated;
-
         return front_pointer;
     }
 }
@@ -132,9 +132,9 @@ static void coalesce_back(void* start) {
     int* back_header_pointer = (char*)start + block_size(start) + 4;
     int back_header = *back_header_pointer;
     char back_allocated = (char)back_header & 0x1;
-    if ( back_allocated == is_allocated(0x1)) {
+    if ( back_allocated == is_allocated(start)) {
         int back_size = back_header & ~0x7;
-        int total_size = back_size + block_size(start);
+        int total_size = back_size + block_size(start) + 8;
 
         int* back_footer_pointer_4bit = (char*)start + total_size + 8;
         int* header_pointer_4bit = header_pointer(start);
@@ -170,8 +170,13 @@ static void remove_range(range_t **ranges, char *lo)
 int mm_init(range_t **ranges)
 {
     /* YOUR IMPLEMENTATION */
-    
+    mem_sbrk(16);
 
+    void* heap_start = mem_heap_lo();
+    printf("start: %x\n", heap_start);
+    *((char*)heap_start + 4) = 0x1;
+    *((char*)heap_start + 8) = 0x1;
+    *((char*)heap_start + 12) = 0x1;
 
     /* DON'T MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
     gl_ranges = ranges;
@@ -185,6 +190,48 @@ int mm_init(range_t **ranges)
  */
 void *mm_malloc(size_t size)
 {
+    //printf("size: %x  ", size);
+    int newsize = ALIGN(size + SIZE_T_SIZE);
+
+    char* pointer = (char*)mem_heap_lo() + 16;
+    char* heap_end = mem_heap_hi();
+
+    while(pointer < heap_end) {
+        int current_block_size = block_size(pointer);
+
+        if ( !is_allocated(pointer) && ALIGN(size) <= current_block_size ) {      //can allocate
+            if ( current_block_size <= ALIGN(size) + 8) {   //just allocate whole
+                rewrite_block_status(pointer, 1);
+            } else {
+                reset_block_size(pointer, ALIGN(size));
+                rewrite_block_status(pointer, 1);
+
+                char* next_pointer = pointer + newsize;
+                reset_block_size(next_pointer, current_block_size-newsize);
+                rewrite_block_status(next_pointer, 0);
+            }
+            //printf("allocate %x\n", pointer);
+            return pointer;
+        } else {                                        //can't allocate
+            pointer += current_block_size + 8;
+        }
+    }
+    //must increase heap
+    void *start_pointer = mem_sbrk(newsize);
+    if (start_pointer == (void *)-1){
+        return NULL;
+    }
+    else {
+        reset_block_size(start_pointer, ALIGN(size));
+        rewrite_block_status(start_pointer, 1);
+        int* back_header_pointer_4bit = (char*)footer_pointer(start_pointer) + 4;
+        *back_header_pointer_4bit = 0x1;
+
+        //printf("allocate %x\n", start_pointer);
+        return start_pointer;
+    }
+    
+    /*
     int newsize = ALIGN(size + SIZE_T_SIZE);
     void *p = mem_sbrk(newsize);
     if (p == (void *)-1)
@@ -193,6 +240,7 @@ void *mm_malloc(size_t size)
         *(size_t *)p = size;
         return (void *)((char *)p + SIZE_T_SIZE);
     }
+    */
 }
 
 /*
@@ -200,8 +248,13 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
+    printf("top: %x\n", mem_heap_hi());
+    //printf("free %x\n", ptr);
     /* YOUR IMPLEMENTATION */
-
+    rewrite_block_status(ptr, 0);
+    //coalesce_back(coalesce_front(ptr));
+    void* middle = coalesce_front(ptr);
+    coalesce_back(middle);
 
     /* DON'T MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
     if (gl_ranges)
@@ -222,6 +275,16 @@ void *mm_realloc(void *ptr, size_t t)
 void mm_exit(void)
 {
     /* YOUR IMPLEMENTATION */
+    //printf("start clean\n");
+    char* pointer = (char*)mem_heap_lo() + 16;
+    char* heap_end = mem_heap_hi();
 
+    while(pointer < heap_end) {
+        char* next_pointer = pointer + block_size(pointer) + 8;
+        if(is_allocated(pointer)) {
+            mm_free(pointer);
+        }
+        pointer = next_pointer;
+    }
 
 }
