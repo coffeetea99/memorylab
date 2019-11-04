@@ -173,7 +173,6 @@ int mm_init(range_t **ranges)
     mem_sbrk(16);
 
     void* heap_start = mem_heap_lo();
-    //printf("start: %x\n", heap_start);
     *((char*)heap_start + 4) = 0x1;
     *((char*)heap_start + 8) = 0x1;
     *((char*)heap_start + 12) = 0x1;
@@ -188,13 +187,8 @@ int mm_init(range_t **ranges)
  *  mm_malloc - Allocate a block by incrementing the brk pointer (example).
  *  Always allocate a block whose size is a multiple of the alignment.-
  */
-int i;
 void *mm_malloc(size_t size)
 {
-    ++i;
-    printf("%d\n", i);
-    printf("size: %d\n", mem_heap_hi() - mem_heap_lo());
-    //printf("size: %x  ", size);
     int newsize = ALIGN(size + SIZE_T_SIZE);
 
     char* pointer = (char*)mem_heap_lo() + 16;
@@ -204,7 +198,7 @@ void *mm_malloc(size_t size)
         int current_block_size = block_size(pointer);
 
         if ( !is_allocated(pointer) && ALIGN(size) <= current_block_size ) {      //can allocate
-            if ( current_block_size <= ALIGN(size) + 8) {   //just allocate whole
+            if ( current_block_size == ALIGN(size) ) {   //just allocate whole
                 rewrite_block_status(pointer, 1);
             } else {
                 reset_block_size(pointer, ALIGN(size));
@@ -214,7 +208,6 @@ void *mm_malloc(size_t size)
                 reset_block_size(next_pointer, current_block_size - newsize);
                 rewrite_block_status(next_pointer, 0);
             }
-            //printf("allocate %x\n", pointer);
             return pointer;
         } else {                                        //can't allocate
             pointer += current_block_size + 8;
@@ -234,7 +227,6 @@ void *mm_malloc(size_t size)
             int* back_header_pointer_4bit = (char*)footer_pointer(start_pointer) + 4;
             *back_header_pointer_4bit = 0x1;
 
-            //printf("allocate %x\n", start_pointer);
             return start_pointer;
         }
     } else {                                    //last block is not allocated
@@ -249,22 +241,9 @@ void *mm_malloc(size_t size)
         int* last_4byte_pointer = last_block_pointer + ALIGN(size) + 4;
         *last_4byte_pointer = 0x1;
 
-        //printf("(increased)allocate %x\n", last_block_pointer);
         return last_block_pointer;
     }
-    
-    
-    
-    /*
-    int newsize = ALIGN(size + SIZE_T_SIZE);
-    void *p = mem_sbrk(newsize);
-    if (p == (void *)-1)
-        return NULL;
-    else {
-        *(size_t *)p = size;
-        return (void *)((char *)p + SIZE_T_SIZE);
-    }
-    */
+
 }
 
 /*
@@ -272,9 +251,6 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    ++i;
-    printf("%d\n", i);
-    //printf("free %x\n", ptr);
     /* YOUR IMPLEMENTATION */
     rewrite_block_status(ptr, 0);
     //coalesce_back(coalesce_front(ptr));
@@ -300,7 +276,6 @@ void *mm_realloc(void *ptr, size_t t)
 void mm_exit(void)
 {
     /* YOUR IMPLEMENTATION */
-    //printf("start clean\n");
     char* pointer = (char*)mem_heap_lo() + 16;
     char* heap_end = mem_heap_hi();
 
