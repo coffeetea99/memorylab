@@ -173,7 +173,7 @@ int mm_init(range_t **ranges)
     mem_sbrk(16);
 
     void* heap_start = mem_heap_lo();
-    printf("start: %x\n", heap_start);
+    //printf("start: %x\n", heap_start);
     *((char*)heap_start + 4) = 0x1;
     *((char*)heap_start + 8) = 0x1;
     *((char*)heap_start + 12) = 0x1;
@@ -248,7 +248,6 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
-    printf("top: %x\n", mem_heap_hi());
     //printf("free %x\n", ptr);
     /* YOUR IMPLEMENTATION */
     rewrite_block_status(ptr, 0);
