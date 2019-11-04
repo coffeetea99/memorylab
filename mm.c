@@ -137,9 +137,10 @@ static void coalesce_back(void* start) {
         int back_size = back_header & ~0x7;
         int total_size = back_size + block_size(start) + 8;
 
-        int* back_footer_pointer_4bit = (char*)start + total_size + 8;
+        int* back_footer_pointer_4bit = (char*)start + total_size;
         int* header_pointer_4bit = header_pointer(start);
-        *header_pointer_4bit = *back_footer_pointer_4bit = total_size | back_allocated;
+        *header_pointer_4bit = total_size | back_allocated;
+        *back_footer_pointer_4bit = total_size | back_allocated;
     }
 }
 
@@ -174,9 +175,9 @@ int mm_init(range_t **ranges)
     mem_sbrk(16);
 
     void* heap_start = mem_heap_lo();
-    *((char*)heap_start + 4) = 0x1;
-    *((char*)heap_start + 8) = 0x1;
-    *((char*)heap_start + 12) = 0x1;
+    *(int*)((char*)heap_start + 4) = 0x1;
+    *(int*)((char*)heap_start + 8) = 0x1;
+    *(int*)((char*)heap_start + 12) = 0x1;
 
     /* DON'T MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
     gl_ranges = ranges;
@@ -190,21 +191,17 @@ int mm_init(range_t **ranges)
  */
 void *mm_malloc(size_t size)
 {
-    printf("%x allocation!\n", ALIGN(size));
     int newsize = ALIGN(size + SIZE_T_SIZE);
 
     char* pointer = (char*)mem_heap_lo() + 16;
     char* heap_end = mem_heap_hi();
     while(pointer < heap_end) {
         int current_block_size = block_size(pointer);
-        printf("pointer: %x, block size: %x\n", pointer, current_block_size);
-
         if ( !is_allocated(pointer) && ALIGN(size) <= current_block_size ) {      //can allocate
             char* next_pointer = pointer + newsize;
-            printf("current block size: %x\n", current_block_size);
+            
             if ( current_block_size == ALIGN(size) ) {   //just allocate whole
                 rewrite_block_status(pointer, 1);
-                printf("ddak daem\n");
             } else {
                 reset_block_size(pointer, ALIGN(size));
                 rewrite_block_status(pointer, 1);
@@ -212,9 +209,6 @@ void *mm_malloc(size_t size)
                 reset_block_size(next_pointer, current_block_size - newsize);
                 rewrite_block_status(next_pointer, 0);
             }
-            printf("allocated block size: %x\n", block_size(pointer));
-            printf("next block pointer: %x == %x\n", pointer + block_size(pointer) + 8, next_pointer);
-            printf("next block header entry: %x\n", block_size(pointer + block_size(pointer) + 8));
             return pointer;
         } else {                                        //can't allocate
             pointer += current_block_size + 8;
@@ -232,7 +226,6 @@ void *mm_malloc(size_t size)
             rewrite_block_status(start_pointer, 1);
             int* back_header_pointer_4bit = (char*)footer_pointer(start_pointer) + 4;
             *back_header_pointer_4bit = 0x1;
-
             return start_pointer;
         }
     } else {                                    //last block is not allocated
@@ -246,7 +239,7 @@ void *mm_malloc(size_t size)
 
         int* last_4byte_pointer = last_block_pointer + ALIGN(size) + 4;
         *last_4byte_pointer = 0x1;
-
+        
         return last_block_pointer;
     }
 
@@ -257,7 +250,6 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {   
-    printf("free! %x\n", ptr);
     /* YOUR IMPLEMENTATION */
     rewrite_block_status(ptr, 0);
     //coalesce_back(coalesce_front(ptr));
