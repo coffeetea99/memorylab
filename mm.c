@@ -96,10 +96,11 @@ static void reset_block_size(void* start, int size){
 /* get start pointer of the block and block status that will change into
  * rewrite status of the block on header and footer
  */
-static void rewrite_block_status(void* start, char status) {
-    char* header_pointer_1bit = header_pointer(start);
-    char* footer_pointer_1bit = footer_pointer(start);
-    *header_pointer_1bit = *footer_pointer_1bit = status | (*footer_pointer_1bit & ~0x7);
+static void rewrite_block_status(void* start, int status) {
+    int* header_pointer_4bit = header_pointer(start);
+    int* footer_pointer_4bit = footer_pointer(start);
+    *header_pointer_4bit = status | (*header_pointer_4bit & ~0x7);
+    *footer_pointer_4bit = status | (*footer_pointer_4bit & ~0x7);
 }
 
 /* get start pointer of the block
@@ -189,31 +190,36 @@ int mm_init(range_t **ranges)
  */
 void *mm_malloc(size_t size)
 {
+    printf("%x allocation!\n", ALIGN(size));
     int newsize = ALIGN(size + SIZE_T_SIZE);
 
     char* pointer = (char*)mem_heap_lo() + 16;
     char* heap_end = mem_heap_hi();
-
     while(pointer < heap_end) {
         int current_block_size = block_size(pointer);
+        printf("pointer: %x, block size: %x\n", pointer, current_block_size);
 
         if ( !is_allocated(pointer) && ALIGN(size) <= current_block_size ) {      //can allocate
+            char* next_pointer = pointer + newsize;
+            printf("current block size: %x\n", current_block_size);
             if ( current_block_size == ALIGN(size) ) {   //just allocate whole
                 rewrite_block_status(pointer, 1);
+                printf("ddak daem\n");
             } else {
                 reset_block_size(pointer, ALIGN(size));
                 rewrite_block_status(pointer, 1);
-
-                char* next_pointer = pointer + newsize;
+                //char* next_pointer = pointer + newsize;
                 reset_block_size(next_pointer, current_block_size - newsize);
                 rewrite_block_status(next_pointer, 0);
             }
+            printf("allocated block size: %x\n", block_size(pointer));
+            printf("next block pointer: %x == %x\n", pointer + block_size(pointer) + 8, next_pointer);
+            printf("next block header entry: %x\n", block_size(pointer + block_size(pointer) + 8));
             return pointer;
         } else {                                        //can't allocate
             pointer += current_block_size + 8;
         }
     }
-
     //must increase heap
     int last_block_footer = *(int*)(pointer-8);
     if ( last_block_footer & 0x1 == 1 ) {       //last block is allocated
@@ -250,7 +256,8 @@ void *mm_malloc(size_t size)
  *  mm_free - Frees a block. Does nothing (example)
  */
 void mm_free(void *ptr)
-{
+{   
+    printf("free! %x\n", ptr);
     /* YOUR IMPLEMENTATION */
     rewrite_block_status(ptr, 0);
     //coalesce_back(coalesce_front(ptr));
