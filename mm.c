@@ -86,19 +86,21 @@ static char is_allocated(void* start) {
 /* get start pointer of the block and block size that will change into
  * rewrite size of the block on header and footer
  */
-static void rewrite_block_size(void* start, int size){
+static void reset_block_size(void* start, int size){
     int* header_pointer_4bit = header_pointer(start);
+    *header_pointer_4bit = size | (*header_pointer_4bit & 0x1);
     int* footer_pointer_4bit = footer_pointer(start);
-    *header_pointer_4bit = *footer_pointer_4bit = size | (*footer_pointer_4bit & 0x1);
+    *footer_pointer_4bit = *header_pointer_4bit;
 }
 
 /* get start pointer of the block and block status that will change into
  * rewrite status of the block on header and footer
  */
-static void rewrite_block_status(void* start, char status) {
-    char* header_pointer_1bit = header_pointer(start);
-    char* footer_pointer_1bit = footer_pointer(start);
-    *header_pointer_1bit = *footer_pointer_1bit = status | (*footer_pointer_1bit & ~0x7);
+static void rewrite_block_status(void* start, int status) {
+    int* header_pointer_4bit = header_pointer(start);
+    int* footer_pointer_4bit = footer_pointer(start);
+    *header_pointer_4bit = status | (*header_pointer_4bit & ~0x7);
+    *footer_pointer_4bit = status | (*footer_pointer_4bit & ~0x7);
 }
 
 /* get start pointer of the block
@@ -113,13 +115,12 @@ static void* coalesce_front(void* start) {
         return start;
     } else {
         int front_size = front_footer & ~0x7;
-        int total_size = front_size + block_size(start);
+        int total_size = front_size + block_size(start) + 8;
 
         void* front_pointer = (char*)start - front_size - 8;
         int* front_header_pointer_4bit = (char*)front_pointer - 4;
         int* footer_pointer_4bit = footer_pointer(start);
         *front_header_pointer_4bit = *footer_pointer_4bit = total_size | front_allocated;
-
         return front_pointer;
     }
 }
@@ -132,13 +133,14 @@ static void coalesce_back(void* start) {
     int* back_header_pointer = (char*)start + block_size(start) + 4;
     int back_header = *back_header_pointer;
     char back_allocated = (char)back_header & 0x1;
-    if ( back_allocated == is_allocated(0x1)) {
+    if ( back_allocated == is_allocated(start)) {
         int back_size = back_header & ~0x7;
-        int total_size = back_size + block_size(start);
+        int total_size = back_size + block_size(start) + 8;
 
-        int* back_footer_pointer_4bit = (char*)start + total_size + 8;
+        int* back_footer_pointer_4bit = (char*)start + total_size;
         int* header_pointer_4bit = header_pointer(start);
-        *header_pointer_4bit = *back_footer_pointer_4bit = total_size | back_allocated;
+        *header_pointer_4bit = total_size | back_allocated;
+        *back_footer_pointer_4bit = total_size | back_allocated;
     }
 }
 
