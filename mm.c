@@ -141,15 +141,24 @@ static void set_in(void* start, int size) {
     int* array = mem_heap_lo();
     int offset = array[index];
 
-    char* pointer = (char*)mem_heap_lo() + 128 + offset;
-    while( offset = *(int*)(pointer+4) ) {
-        pointer += offset;
+    if ( offset == 0 ) {        //no one in this list
+        array[index] = (char*)start - ((char*)mem_heap_lo() + 128);
+        *(int*)start = 0;
+        *(int*)((char*)start + 4) = 0;
+    } else {
+        char* pointer = (char*)mem_heap_lo() + 128;
+        while( offset ) {
+            pointer += offset;
+            offset = *(int*)(pointer+4);
+        }
+
+        int gap = (char*)start - pointer;
+        *(int*)(pointer + 4) = gap;
+        *(int*)start = -gap;
+        *(int*)((char*)start + 4) = 0;
     }
 
-    int gap = (char*)start - pointer;
-    *(int*)(pointer + 4) = gap;
-    *(int*)start = -gap;
-    *(int*)((char*)start + 4) = 0;
+    
 }
 
 /* get start pointer of a free block
@@ -234,8 +243,12 @@ static void remove_range(range_t **ranges, char *lo)
 int mm_init(range_t **ranges)
 {
     /* YOUR IMPLEMENTATION */
-    
+    mem_sbrk(128);
 
+    void* heap_start = mem_heap_lo();
+    *(int*)((char*)heap_start + 116) = 0x1;
+    *(int*)((char*)heap_start + 120) = 0x1;
+    *(int*)((char*)heap_start + 124) = 0x1;
 
     /* DON'T MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
     gl_ranges = ranges;
@@ -249,14 +262,7 @@ int mm_init(range_t **ranges)
  */
 void *mm_malloc(size_t size)
 {
-    int newsize = ALIGN(size + SIZE_T_SIZE);
-    void *p = mem_sbrk(newsize);
-    if (p == (void *)-1)
-        return NULL;
-    else {
-        *(size_t *)p = size;
-        return (void *)((char *)p + SIZE_T_SIZE);
-    }
+
 }
 
 /*
