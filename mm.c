@@ -90,6 +90,14 @@ static size_t footer(void* start) {
     return *((size_t*)footer_pointer(start));
 }
 
+static int* front_offset_entry_pointer(void* start) {
+    return (int*)((char*)start + 4);
+}
+
+static int* back_offset_entry_pointer(void* start) {
+    return (int*)start;
+}
+
 /* get start pointer of the block
  * return if the block is allocated(1 byte)
  */
@@ -121,41 +129,48 @@ static void rewrite_block_status(void* start, char status) {
  * cut off the block from segregated list
  */
 static void cut_off(void* start) {
-    int left_offset = *(int*)start;
-    int right_offset = *(int*)((char*)start + 4);
-    if ( left_offset ) {
-        char* left_pointer = (char*)start + left_offset;
-        *(int*)(left_pointer + 4) += right_offset;
+    printf("cutting %x\n", start);
+    int front_offset = *front_offset_entry_pointer(start);
+    int back_offset = *back_offset_entry_pointer(start);
+    if ( front_offset ) {
+        char* front_pointer = (char*)start + front_offset;
+        *back_offset_entry_pointer(front_pointer) += back_offset;
+        if(back_offset == 0) {
+            *back_offset_entry_pointer(front_pointer) = 0;
+            printf("back offset of %x is now zero\n", front_pointer);
+        }
     }
-    if ( right_offset ) {
-        char* right_pointer = (char*)start + right_offset;
-        *(int*)right_pointer += left_offset;
+    if ( back_offset ) {
+        char* back_pointer = (char*)start + back_offset;
+        *front_offset_entry_pointer(back_pointer) += front_offset;
     }
 }
 
-/* get start pointer and size of block
+/* get start pointer and size of relocating block
  * put the block in the segregated list
  */
-static void set_in(void* start, int size) {
+static void set_in(void* new, int size) {
+    printf("block start point: %x, size: %x\n", new, size);
     int index = size_to_index(size);
     int* array = mem_heap_lo();
     int offset = array[index];
-
     if ( offset == 0 ) {        //no one in this list
-        array[index] = (char*)start - ((char*)mem_heap_lo() + 128);
-        *(int*)start = 0;
-        *(int*)((char*)start + 4) = 0;
+        array[index] = (char*)new - (char*)&array[index];
+        *front_offset_entry_pointer(new) = -array[index];
+        *back_offset_entry_pointer(new) = 0;
     } else {
-        char* pointer = (char*)mem_heap_lo() + 128;
+        char* pointer = &array[index];
         while( offset ) {
+            printf("pointer %x offset %d\n", pointer, offset);
             pointer += offset;
-            offset = *(int*)(pointer+4);
+            offset = *back_offset_entry_pointer(pointer);
         }
-
-        int gap = (char*)start - pointer;
-        *(int*)(pointer + 4) = gap;
-        *(int*)start = -gap;
-        *(int*)((char*)start + 4) = 0;
+        //pointer: last block, new: new block
+        int gap = (char*)new - pointer;
+        *back_offset_entry_pointer(pointer) = gap;
+        *front_offset_entry_pointer(new) = -gap;
+        *back_offset_entry_pointer(new) = 0;
+        printf("%x %x %x\n", pointer, new, gap);
     }
 }
 
@@ -170,8 +185,10 @@ static void* coalesce_front(void* start) {
     if ( front_allocated ) {    //can't coaleace
         return start;
     } else {                    //can coaleace
+        printf("can coalesce with front\n");
         size_t front_size = front_footer & ~0x7;
         size_t total_size = front_size + block_size(start) + 16;
+
         void* front_pointer = (char*)start - front_size - 16;
 
         cut_off(start);
@@ -183,7 +200,6 @@ static void* coalesce_front(void* start) {
         *footer_pointer_4bit = total_size;
 
         set_in(front_pointer, total_size);
-
         return front_pointer;
     }
 }
@@ -197,10 +213,12 @@ static void coalesce_back(void* start) {
     int back_header = *back_header_pointer;
     char back_allocated = (char)back_header & 0x1;
     if ( !back_allocated ) {
+        printf("can coalesce with back\n");
         int back_size = back_header & ~0x7;
         int total_size = back_size + block_size(start) + 16;
 
         void* back_pointer = (char*)start + block_size(start) + 16;
+
         cut_off(start);
         cut_off(back_pointer);
 
@@ -260,6 +278,7 @@ int mm_init(range_t **ranges)
  */
 void *mm_malloc(size_t size)
 {   
+    printf("\nmalloc %x\n", size);
     size = ALIGN(size);
     int index = size_to_index(size);
 
@@ -268,8 +287,8 @@ void *mm_malloc(size_t size)
     for ( ; index < 29 ; ++index ) {
         int offset = array[index];
 
-        if ( offset != 0 ){
-            char* pointer = (char*)mem_heap_lo() + 128 + offset;
+        if ( offset != 0 ){     //뭔가 있다
+            char* pointer = &(array[index]);
             while( offset ) {
                 int current_size = block_size(pointer);
                 char current_allocated = is_allocated(pointer);
@@ -278,29 +297,30 @@ void *mm_malloc(size_t size)
                     if (current_size == size || current_size == size + 8 ) {      //allocate all
                         rewrite_block_status(pointer, 1);
                     } else {                                                                    //cut the block
+                        cut_off(pointer);
+
                         reset_block_size(pointer, size);
                         rewrite_block_status(pointer, 1);
+                        set_in(pointer, size);
 
-                        void* next_pointer = pointer + block_size(pointer) + 16;
+                        void* next_pointer = pointer + size + 16;
                         int cut_block_size = current_size - size - 16;
 
                         reset_block_size(next_pointer, cut_block_size);
-                        rewrite_block_status(pointer, 0);
+                        rewrite_block_status(next_pointer, 0);
                         set_in(next_pointer, cut_block_size);
                     }
                     return pointer;
                 }
                 //go next
+                offset = *back_offset_entry_pointer(pointer);
                 pointer += offset;
-                offset = *(int*)(pointer+4);
             }
         }
-
     }
     //the list for this block is empty, or has no proper size
-
+    
     char* pointer = mem_sbrk(size + 16);
-    pointer += 4;
     reset_block_size(pointer, size);
     rewrite_block_status(pointer, 1);
     set_in(pointer, size);
@@ -316,8 +336,11 @@ void *mm_malloc(size_t size)
  */
 void mm_free(void *ptr)
 {
+    printf("\nfree %x\n", ptr);
     /* YOUR IMPLEMENTATION */
-
+    rewrite_block_status(ptr, 0);
+    void* middle = coalesce_front(ptr);
+    coalesce_back(middle);
 
     /* DON'T MODIFY THIS STAGE AND LEAVE IT AS IT WAS */
     if (gl_ranges)
@@ -338,6 +361,19 @@ void *mm_realloc(void *ptr, size_t t)
 void mm_exit(void)
 {
     /* YOUR IMPLEMENTATION */
+    int* array = mem_heap_lo();
+    int index;
 
+    for (index = 0; index < 29; ++index) {
+        char* pointer = &(array[index]);
+        int offset = array[index];
+        while( offset ) {
 
+            if ( is_allocated(pointer) ) {
+                mm_free(pointer);
+            }
+            offset = *back_offset_entry_pointer(pointer);
+            pointer += offset;
+        }
+    }
 }
