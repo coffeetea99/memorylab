@@ -111,8 +111,8 @@ static void reset_block_size(void* start, size_t size){
  * rewrite status of the block on header and footer
  */
 static void rewrite_block_status(void* start, char status) {
-    size_t* header_pointer_4bit = header_pointer(start);
-    size_t* footer_pointer_4bit = footer_pointer(start);
+    int* header_pointer_4bit = header_pointer(start);
+    int* footer_pointer_4bit = footer_pointer(start);
     *header_pointer_4bit = status | (*header_pointer_4bit & ~0x7);
     *footer_pointer_4bit = status | (*footer_pointer_4bit & ~0x7);
 }
@@ -157,8 +157,6 @@ static void set_in(void* start, int size) {
         *(int*)start = -gap;
         *(int*)((char*)start + 4) = 0;
     }
-
-    
 }
 
 /* get start pointer of a free block
@@ -261,8 +259,56 @@ int mm_init(range_t **ranges)
  *  Always allocate a block whose size is a multiple of the alignment.-
  */
 void *mm_malloc(size_t size)
-{
+{   
+    size = ALIGN(size);
+    int index = size_to_index(size);
 
+    int* array = mem_heap_lo();
+
+    for ( ; index < 29 ; ++index ) {
+        int offset = array[index];
+
+        if ( offset != 0 ){
+            char* pointer = (char*)mem_heap_lo() + 128 + offset;
+            while( offset ) {
+                int current_size = block_size(pointer);
+                char current_allocated = is_allocated(pointer);
+
+                if ( !current_allocated && current_size >= size) {       //we found an empty block!
+                    if (current_size == size || current_size == size + 8 ) {      //allocate all
+                        rewrite_block_status(pointer, 1);
+                    } else {                                                                    //cut the block
+                        reset_block_size(pointer, size);
+                        rewrite_block_status(pointer, 1);
+
+                        void* next_pointer = pointer + block_size(pointer) + 16;
+                        int cut_block_size = current_size - size - 16;
+
+                        reset_block_size(next_pointer, cut_block_size);
+                        rewrite_block_status(pointer, 0);
+                        set_in(next_pointer, cut_block_size);
+                    }
+                    return pointer;
+                }
+                //go next
+                pointer += offset;
+                offset = *(int*)(pointer+4);
+            }
+        }
+
+    }
+    //the list for this block is empty, or has no proper size
+
+    char* pointer = mem_sbrk(size + 16);
+    pointer += 4;
+    reset_block_size(pointer, size);
+    rewrite_block_status(pointer, 1);
+    set_in(pointer, size);
+
+    char* last_pointer = mem_heap_hi();
+    last_pointer -= 3;
+    *(int*)last_pointer = 0x1;
+    return pointer;
 }
 
 /*
